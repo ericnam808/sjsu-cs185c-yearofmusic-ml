@@ -7,6 +7,8 @@ Naive bayesian classifier using sklearn.
 """
 
 from numpy import *
+from sklearn.externals import joblib
+from sklearn.preprocessing import LabelEncoder
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.feature_extraction.text import CountVectorizer, TfidfTransformer
 from sklearn import metrics
@@ -21,10 +23,10 @@ def splice_delimited_columns(data_filepath, columns):
     features = []
     with open(data_filepath, 'rb') as csvfile:
         reader = csv.reader(csvfile)
-        for line in reader:   
+        for line in reader:
             features.append(
                 map(lambda i: line[i], columns))
-                
+            
     return features
 
 def splice_columns(arr, indexes):
@@ -56,6 +58,12 @@ def train_classifer(classifer, training_file, test_file, columns, class_col, dat
     print raw_classes[:3]
     print "Raw training feature samples:"
     print training_features[:3]
+
+    label_maker = LabelEncoder()
+    label_maker.fit(raw_classes)
+
+    labeled_classes = label_maker.transform(raw_classes)
+    log.info('# unique classes: %d' % len(label_maker.classes_))
     
     # account for weird, non-unicode chars 
     count_vect = CountVectorizer(
@@ -71,7 +79,7 @@ def train_classifer(classifer, training_file, test_file, columns, class_col, dat
     X_train_tfidf = tfidf_transformer.fit_transform(X_train_counts)
     
     log.info('Fitting classifer. This may take some time...')
-    classifer.fit(X_train_tfidf.toarray(), raw_classes)
+    classifer.fit(X_train_tfidf.toarray(), labeled_classes)
     log.info('Fit successful!')
     
     ### Validation Section ###
@@ -96,14 +104,23 @@ def train_classifer(classifer, training_file, test_file, columns, class_col, dat
     
     log.info('Running predictions. This may also take up your time...')
     results = classifer.predict(X_new_tfidf.toarray())
+    
     log.info('Success! Generating report.')
     
-    report = metrics.classification_report(
-        test_classes, results, labels=None)
+    # remap results back to year.
+    map_results = label_maker.inverse_transform(results)
     
-    return report
+    report = metrics.classification_report(
+        test_classes, map_results, labels=None)
+    
+    classifier_obj =  {
+        'classifier': classifer,
+        'vectorizer': count_vect,
+        'class_list': label_maker.classes_ }
 
-def main():
+    return report, classifier_obj
+
+def main(save_clf=False):
 
     columns = [0,2,3]
     class_col = 0
@@ -113,9 +130,9 @@ def main():
 
         print '## Executing Classifer "%s" ##' % title
 
-        report = train_classifer(
+        report, classifier_obj = train_classifer(
             clf,
-            r'data/debug_combo2.txt',
+            r'data/training_tracks_MIN6.txt',
             r'data/debug_combo2_test.txt',
             columns,
             class_col,
@@ -126,15 +143,30 @@ def main():
 
         with open(output_filepath, 'w') as outfile: 
             outfile.write(report)
-    
-    classifers = [
-        ('MultinomialNB - Artist_Title Year Classifier',
+        
+        return classifier_obj
+        
+    def save_classifier(clf, file_path):
+        log.info("Saving classifier state to '%s'..." % file_path)
+        joblib.dump(clf, file_path) 
+        log.info('Save successful.')
+
+    classifiers = [
+        ('MultinomialNB-Artist_Title Year Classifier',
                 MultinomialNB(alpha=.01),
                 r'results/nb_result_2.txt') ]
     
     # execute test
-    map(lambda x: execute_test(x[0],x[1],x[2]), classifers)
+    classifier_objs = map(lambda x: execute_test(x[0],x[1],x[2]), classifiers)
+    
+    if (save_clf):
+        log.info('Saving classifiers.')
+        filenames = map(
+            lambda p: r'classifiers/%s.pkl' % p[0],
+            classifiers)
+        map(save_classifier, classifier_objs, filenames)
     
     log.info('Normal program exit.')
-main()
+
+main(save_clf=True)
 
