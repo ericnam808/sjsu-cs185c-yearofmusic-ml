@@ -6,7 +6,7 @@ Script for demonstrating classifiers.
 
 from sklearn.externals import joblib
 from sklearn.preprocessing import LabelEncoder
-from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.feature_extraction.text import TfidfTransformer
 
 import heapq, itertools, threading
 
@@ -35,25 +35,24 @@ def _sift_results_(i, j, n=10, threshold=0.00001):
 def build_classifier(file_path, threshold):
     
     print "[INFO] Loading classifier '%s'..." % file_path,
+    
     clf_obj = joblib.load(file_path)
-    print 'Done!'
-
+    
     clf = clf_obj['classifier']
+    count_vect = clf_obj['vectorizer']
     cls = clf_obj['class_list']
-    lookup_list = clf_obj['class_year_map']
-
-    print "[INFO] Rehydrating classes...",
-    vectorizer = CountVectorizer(
-        decode_error='replace',
-        strip_accents='unicode',
-        binary=True)
-    vectorized_corpus = vectorizer.fit_transform(cls)
+    tfidf_transformer = TfidfTransformer()
+    
     print "Done!"
 
     def _w_(str_):
         
-        s = vectorizer.transform([str_]).toarray()
-
+        # original vect is a CountVectorizer
+        interm_s = count_vect.transform([str_]).toarray()
+        
+        # Vectorize by tf-idf
+        s = tfidf_transformer.fit_transform(interm_s)
+    
         print "Searching for '%s'..." % str_
         r = clf.predict_proba(s)
         x = _sift_results_(cls, r[0], n=10, threshold=threshold)
@@ -65,14 +64,8 @@ def build_classifier(file_path, threshold):
 
         y = []
         for l in itertools.imap(lambda v: v, x):
-            if (l[0] in lookup_list):
-                y.append((
-                    l[0],
-                    list(lookup_list[l[0]]),
-                    "%.3f%%" % (100.0 * l[1])))
-            else:
-                y.append('No years found.')
-        
+            y.append((l[0], "%.3f%%" % (100.0 * l[1])))
+            
         return {
             'search_str': str_,
             'result': y }
@@ -111,7 +104,7 @@ def compose_searcher(clf_fn):
     return _w_
 
 search = compose_searcher(
-    r'classifiers/GNB-Artist_Title Combo Classifer.pkl')
+    r'classifiers/MultinomialNB-Artist_Title Year Classifier.pkl')
 
 print "\nIn the command line, type search('text'), replacing -text- with your search string."
 print "Search is performed by word (space-delimited). Only the top 10 results are listed."
